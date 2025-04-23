@@ -1,0 +1,17 @@
+### For running yelp with default DiffRec:
+    
+    python C-DiffRec/main_yelp.py 
+
+### For running yelp with enhanced DiffRec:
+
+    python C-DiffRec/main_yelp.py --conditional --sim_normalization softmax --similarity_method=jaccard
+
+
+
+### For running ml-1m with default DiffRec:
+    
+    python C-DiffRec/main_ml.py 
+
+### For running yelp with enhanced DiffRec:
+
+    python C-DiffRec/main_ml.py --conditional --sim_normalization softmax --similarity_method=jaccard

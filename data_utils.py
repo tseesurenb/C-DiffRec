@@ -9,6 +9,10 @@ import os
 from torch.utils.data import Dataset
 import torch.nn.functional as F
 
+from scipy.sparse import csr_matrix
+from sklearn.metrics.pairwise import cosine_similarity
+
+
 def data_load(train_path, valid_path, test_path, similarity_matrix_path=None):
     train_list = np.load(train_path, allow_pickle=True)
     valid_list = np.load(valid_path, allow_pickle=True)
@@ -61,11 +65,8 @@ def data_load(train_path, valid_path, test_path, similarity_matrix_path=None):
     return train_data, valid_y_data, test_y_data, n_user, n_item, similarity_matrix
 
 
-import numpy as np
-from scipy.sparse import csr_matrix
-from sklearn.metrics.pairwise import cosine_similarity
 
-def compute_similarity_matrix(train_data, method='cosine'):
+def compute_similarity_matrix_dense(train_data, method='cosine'):
     """
     Efficient similarity computation using sparse operations.
     
@@ -101,6 +102,51 @@ def compute_similarity_matrix(train_data, method='cosine'):
 
     else:
         raise ValueError(f"Unsupported similarity method: {method}")
+    
+from scipy.sparse import csr_matrix
+import heapq
+
+def compute_similarity_matrix(train_data, method='cosine', top_k=3):
+    """
+    Efficient similarity computation using sparse operations.
+    
+    :param train_data: User-item interaction matrix (csr_matrix)
+    :param method: 'cosine' or 'jaccard'
+    :param top_k: Top-K similar users to keep (only applies to jaccard)
+    :return: User similarity matrix (dense for cosine, sparse dict for jaccard)
+    """
+    if method == 'cosine':
+        from sklearn.metrics.pairwise import cosine_similarity
+        return cosine_similarity(train_data)
+
+    elif method == 'jaccard':
+        bin_data = train_data.copy()
+        bin_data.data = np.ones_like(bin_data.data)
+        n_users = bin_data.shape[0]
+        row_sums = np.array(bin_data.sum(axis=1)).flatten()
+
+        sim_dict = {}
+
+        for i in range(n_users):
+            neighbors = bin_data[i].dot(bin_data.T).tocoo()
+            heap = []
+
+            for j, inter in zip(neighbors.col, neighbors.data):
+                if i == j:
+                    continue
+                union = row_sums[i] + row_sums[j] - inter
+                sim = inter / union
+                heapq.heappush(heap, (sim, j))
+                if len(heap) > top_k:
+                    heapq.heappop(heap)
+
+            sim_dict[i] = sorted(heap, reverse=True)
+
+        return sim_dict
+
+    else:
+        raise ValueError(f"Unsupported similarity method: {method}")
+
 
 
 
