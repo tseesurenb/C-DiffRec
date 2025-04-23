@@ -210,8 +210,37 @@ def compute_similarity_matrix(train_data, method='cosine', top_k=3):
 
 
 
-
 def get_top_k_similar_users(similarity_matrix, user_id, k=3):
+    """
+    Find top-k similar users for a given user
+    
+    :param similarity_matrix: User similarity matrix (dense or sparse)
+    :param user_id: Target user ID
+    :param k: Number of similar users to return
+    :return: Indices and similarity scores of top-k similar users
+    """
+    n_users = similarity_matrix.shape[0]
+    
+    if user_id >= n_users:
+        raise IndexError(f"user_id {user_id} is out of bounds for similarity matrix with {n_users} users.")
+
+    # Convert row to dense vector
+    if sp.issparse(similarity_matrix):
+        user_similarities = similarity_matrix[user_id].toarray().flatten()
+    else:
+        user_similarities = similarity_matrix[user_id].copy()
+    
+    # Exclude self-similarity
+    user_similarities[user_id] = -1
+    
+    # Get top-k indices
+    top_indices = np.argsort(user_similarities)[::-1][:k]
+    top_similarities = user_similarities[top_indices]
+    
+    return top_indices, top_similarities
+
+
+def get_top_k_similar_users_old(similarity_matrix, user_id, k=3):
     """
     Find top-k similar users for a given user
     
