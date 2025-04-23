@@ -10,6 +10,10 @@ from torch.utils.data import Dataset
 import torch.nn.functional as F
 
 from scipy.sparse import csr_matrix
+# Top-k approach (more memory efficient)
+from scipy.sparse import lil_matrix
+import numpy as np
+        
 from sklearn.metrics.pairwise import cosine_similarity
 
 
@@ -120,30 +124,87 @@ def compute_similarity_matrix(train_data, method='cosine', top_k=3):
         return cosine_similarity(train_data)
 
     elif method == 'jaccard':
+        # Ensure data is binary
         bin_data = train_data.copy()
         bin_data.data = np.ones_like(bin_data.data)
-        n_users = bin_data.shape[0]
+        
+        # Compute row sums (number of items per user)
         row_sums = np.array(bin_data.sum(axis=1)).flatten()
-
-        sim_dict = {}
-
-        for i in range(n_users):
-            neighbors = bin_data[i].dot(bin_data.T).tocoo()
-            heap = []
-
-            for j, inter in zip(neighbors.col, neighbors.data):
+        
+        # Compute dot product for intersections (sparse operation)
+        intersection = bin_data.dot(bin_data.T)
+        
+        # Create result container
+        n_users = bin_data.shape[0]
+        
+        if top_k is None:
+            # Full similarity matrix approach (memory intensive but faster)
+            # Convert to COO format for easier manipulation
+            intersection_coo = intersection.tocoo()
+            
+            # Create arrays for sparse matrix construction
+            rows, cols, data = [], [], []
+            
+            # Process each non-zero element
+            for i, j, inter_val in zip(intersection_coo.row, intersection_coo.col, intersection_coo.data):
+                # Skip self-similarity if desired
                 if i == j:
                     continue
-                union = row_sums[i] + row_sums[j] - inter
-                sim = inter / union
-                heapq.heappush(heap, (sim, j))
-                if len(heap) > top_k:
-                    heapq.heappop(heap)
-
-            sim_dict[i] = sorted(heap, reverse=True)
-
-        return sim_dict
-
+                    
+                # Calculate union and similarity
+                union_val = row_sums[i] + row_sums[j] - inter_val
+                
+                # Avoid division by zero
+                if union_val == 0:
+                    continue
+                    
+                sim = inter_val / union_val
+                
+                # Save result
+                rows.append(i)
+                cols.append(j)
+                data.append(sim)
+            
+            # Create sparse similarity matrix
+            from scipy.sparse import csr_matrix
+            sim_matrix = csr_matrix((data, (rows, cols)), shape=(n_users, n_users))
+            return sim_matrix
+            
+        else:
+            
+            # Use LIL format for efficient row manipulation
+            sim_matrix = lil_matrix((n_users, n_users))
+            
+            for i in range(n_users):
+                # Get intersection values for user i with all other users
+                row_intersection = intersection[i].toarray().flatten()
+                
+                # Calculate all unions and similarities at once
+                unions = row_sums[i] + row_sums - row_intersection
+                
+                # Avoid division by zero
+                mask = unions > 0
+                sims = np.zeros_like(unions, dtype=float)
+                sims[mask] = row_intersection[mask] / unions[mask]
+                
+                # Set self-similarity to 0
+                sims[i] = 0
+                
+                # Get top-k indices
+                if top_k < n_users:
+                    top_indices = np.argpartition(sims, -top_k)[-top_k:]
+                    top_indices = top_indices[np.argsort(-sims[top_indices])]
+                else:
+                    top_indices = np.argsort(-sims)
+                
+                # Store only top-k similarities
+                for j, idx in enumerate(top_indices):
+                    if sims[idx] > 0:
+                        sim_matrix[i, idx] = sims[idx]
+            
+            # Convert to CSR for efficient usage
+            return sim_matrix.tocsr()
+    
     else:
         raise ValueError(f"Unsupported similarity method: {method}")
 
